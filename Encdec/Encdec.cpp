@@ -99,11 +99,18 @@ void Decode(std::string& str, std::string const& k)
 int main(int argc, char* argv[])
 {
 	popl::OptionParser parser("Encdec options");
+	auto help = parser.add<popl::Switch>("h", "help", "Show help about options");
 	auto mode = parser.add<popl::Value<std::string>>("m", "mode", "Encoder/decoder mode (encode, decode)");
 	auto key = parser.add<popl::Value<std::string>>("k", "key", "Encoder/decoder key");
 	auto input = parser.add<popl::Value<std::string>>("i", "input", "Input filename");
 	auto output = parser.add<popl::Value<std::string>>("o", "output", "Output filename");
 	parser.parse(argc, argv);
+
+	if (help->is_set())
+	{
+		std::cout << parser << "\n";
+		return 0;
+	}
 
 	if (!input->is_set() || !output->is_set())
 	{
