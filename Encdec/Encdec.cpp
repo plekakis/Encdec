@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <string>
 #include <sstream>
+#include <filesystem>
 
 #include "popl/include/popl.hpp"
 #include "plusaes/plusaes.hpp"
@@ -140,6 +141,75 @@ bool Decode(std::vector<uint8_t> const& encoded, std::string& decoded, std::stri
 	return true;
 }
 
+bool Work(OperationMode mode, std::string const& input, std::string const& output, std::string const& key)
+{
+	std::cout << ((mode == OperationMode::Encode) ? "Encoding " : "Decoding ") << input << " to " << output << "..." << std::endl;
+
+	// Open source file for reading.
+	auto const readmode = mode == OperationMode::Decode ? (std::ios::in | std::ios::binary) : std::ios::in;
+	std::ifstream inputFile(input, readmode);
+	if (!inputFile.is_open())
+	{
+		std::cerr << "Cannot open input for reading!";
+		return false;
+	}
+
+	// Open destination for writing.
+	auto const writemode = mode == OperationMode::Encode ? (std::ios::out | std::ios::binary) : std::ios::out;
+	std::ofstream outputFile(output, writemode);
+	if (!outputFile.is_open())
+	{
+		std::cerr << "Cannot open output for writing!";
+		return false;
+	}
+
+	// Perform encode/decode operation.
+	if (mode == OperationMode::Encode)
+	{
+		std::stringstream source;
+		source << inputFile.rdbuf();
+		std::vector<uint8_t> encoded;
+		Encode(source.str(), encoded, key);
+
+		// Validate
+		std::cout << "Validating..." << std::endl;
+
+		std::string decoded;
+		Decode(encoded, decoded, key);
+		if (decoded != source.str())
+		{
+			std::cerr << "Decoded string doesn't match source after encoding! Skipping file write.";
+			return false;
+		}
+
+		outputFile.write((char*)&encoded[0], encoded.size());
+	}
+	else if (mode == OperationMode::Decode)
+	{
+		std::vector<uint8_t> encoded((std::istreambuf_iterator<char>(inputFile)), std::istreambuf_iterator<char>());
+		std::string decoded;
+
+		Decode(encoded, decoded, key);
+		// Validate
+		std::cout << "Validating..." << std::endl;
+
+		std::vector<uint8_t> encoded2;
+		Encode(decoded, encoded2, key);
+		if (encoded != encoded2)
+		{
+			std::cerr << "Encoded string doesn't match source after decoding! Skipping file write.";
+			return -1;
+		}
+
+		outputFile << decoded;
+	}
+
+	inputFile.close();
+	outputFile.close();
+
+	std::cout << "Success!";
+}
+
 int main(int argc, char* argv[])
 {
 	popl::OptionParser parser("Encdec options");
@@ -148,6 +218,7 @@ int main(int argc, char* argv[])
 	auto key = parser.add<popl::Value<std::string>>("k", "key", "Encoder/decoder key");
 	auto input = parser.add<popl::Value<std::string>>("i", "input", "Input filename");
 	auto output = parser.add<popl::Value<std::string>>("o", "output", "Output filename");
+	auto doall = parser.add<popl::Switch>("a", "all", "Iterate on all the expected input files (.txt for encoding, .bin for decoding)");
 	parser.parse(argc, argv);
 
 	if (help->is_set())
@@ -156,7 +227,7 @@ int main(int argc, char* argv[])
 		return 0;
 	}
 
-	if (!input->is_set() || !output->is_set())
+	if ((!input->is_set() || !output->is_set()) && !doall->is_set())
 	{
 		std::cerr << "Input and/or output filename is not set!";
 		return -1;
@@ -191,73 +262,49 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 
-	// Open source file for reading.
-	auto const readmode = modeVal == OperationMode::Decode ? (std::ios::in | std::ios::binary) : std::ios::in;
-	std::ifstream inputFile(input->value(), readmode);
-	if (!inputFile.is_open())
+	bool success = true;
+	// Iterate through all the expected filenames.
+	if (doall->is_set())
 	{
-		std::cerr << "Cannot open input for reading!";
-		return -1;
-	}
+		namespace fs = std::filesystem;
+		
+		for (const auto& entry : fs::directory_iterator(fs::current_path()))
+		{	
+			auto filename = entry.path();
 
-	// Open destination for writing.
-	auto const writemode = modeVal == OperationMode::Encode ? (std::ios::out | std::ios::binary) : std::ios::out;
-	std::ofstream outputFile(output->value(), writemode);
-	if (!outputFile.is_open())
+			if (!entry.is_regular_file() || !filename.has_extension() || !filename.has_filename())
+				continue;
+			
+			std::string inputFilename, outputFilename;
+			if (modeVal == OperationMode::Encode)
+			{
+				if (filename.extension() == ".txt")
+				{
+					inputFilename = filename.string();
+					filename.replace_extension(".bin");
+					outputFilename = filename.string();
+				}
+			}
+			else if (modeVal == OperationMode::Decode)
+			{
+				if (filename.extension() == ".bin")
+				{
+					inputFilename = filename.string();
+					filename.replace_extension(".txt");
+					outputFilename = filename.string();
+				}
+			}
+
+			if (!inputFilename.empty() && !outputFilename.empty())
+			{
+				success &= Work(modeVal, inputFilename, outputFilename, key->value());
+			}
+		}		
+	}
+	else
 	{
-		std::cerr << "Cannot open output for writing!";
-		return -1;
+		success &= Work(modeVal, input->value(), output->value(), key->value());
 	}
-
-	// Perform encode/decode operation.
-	if (modeVal == OperationMode::Encode)
-	{
-		std::cout << "Encoding " << input->value() << " to " << output->value() << "..." << std::endl;
-
-		std::stringstream source;
-		source << inputFile.rdbuf();
-		std::vector<uint8_t> encoded;
-		Encode(source.str(), encoded, key->value());
-
-		// Validate
-		std::cout << "Validating..." << std::endl;
-
-		std::string decoded;
-		Decode(encoded, decoded, key->value());
-		if (decoded != source.str())
-		{
-			std::cerr << "Decoded string doesn't match source after encoding! Skipping file write.";
-			return -1;
-		}
-
-		outputFile.write((char*)&encoded[0], encoded.size());
-	}
-	else if (modeVal == OperationMode::Decode)
-	{
-		std::cout << "Decoding " << input->value() << " to " << output->value() << "..." << std::endl;
-				
-		std::vector<uint8_t> encoded((std::istreambuf_iterator<char>(inputFile)), std::istreambuf_iterator<char>());
-		std::string decoded;
-
-		Decode(encoded, decoded, key->value());
-		// Validate
-		std::cout << "Validating..." << std::endl;
-
-		std::vector<uint8_t> encoded2;
-		Encode(decoded, encoded2, key->value());
-		if (encoded != encoded2)
-		{
-			std::cerr << "Encoded string doesn't match source after decoding! Skipping file write.";
-			return -1;
-		}
-
-		outputFile << decoded;
-	}
-
-	inputFile.close();
-	outputFile.close();
-
-	std::cout << "Success!";
 	
-	return 0;
+	return success ? 0 : -1;
 }
