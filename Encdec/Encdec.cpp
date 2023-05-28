@@ -27,6 +27,13 @@
 #include "popl/include/popl.hpp"
 #include "plusaes/plusaes.hpp"
 
+enum class OperationMode : uint8_t
+{
+	Unknown,
+	Encode,
+	Decode
+};
+
 constexpr unsigned char iv[16] =
 {
 		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
@@ -66,6 +73,7 @@ namespace StringOps
 void Encode(std::string& str, std::string const& k)
 {
 	char keyval[17];
+	memset(keyval, 0, sizeof(keyval));
 	strcpy_s(keyval, k.c_str());
 	auto const key = plusaes::key_from_string(&keyval);
 
@@ -81,6 +89,7 @@ void Encode(std::string& str, std::string const& k)
 void Decode(std::string& str, std::string const& k)
 {
 	char keyval[17];
+	memset(keyval, 0, sizeof(keyval));
 	strcpy_s(keyval, k.c_str());
 	auto const key = plusaes::key_from_string(&keyval);
 
@@ -133,38 +142,37 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 
+	std::string modeStr = mode->value();
+	StringOps::ToLower(modeStr);
+
+	OperationMode modeVal = OperationMode::Unknown;
+	if (modeStr == "encode")
+		modeVal = OperationMode::Encode;
+	else if (modeStr == "decode")
+		modeVal = OperationMode::Decode;
+	else
+	{
+		std::cerr << "Invalid operation mode!";
+		return -1;
+	}
+
 	// Open source file for reading.
-	std::ifstream inputFile(input->value());
+	auto const readmode = modeVal == OperationMode::Decode ? (std::ios::in | std::ios::binary) : std::ios::in;
+	std::ifstream inputFile(input->value(), readmode);
 	if (!inputFile.is_open())
 	{
 		std::cerr << "Cannot open input for reading!";
 		return -1;
 	}	
 
-	std::string modeStr = mode->value();
-	StringOps::ToLower(modeStr);
-
 	// Read source and encode/decode
 	std::stringstream source;
-	std::vector<std::string> lines;
-	std::string line;
-	while (std::getline(inputFile, line))
-	{	
-		lines.push_back(line);
-	}
-	for (auto i=0; i<lines.size(); ++i)
-	{
-		source << lines[i];
-		if (i != lines.size() - 1)
-		{
-			source << std::endl;
-		}
-	}
+	source << inputFile.rdbuf();
 	inputFile.close();
 
 	std::string sourceStr = source.str();
 	// Perform encode/decode operation.
-	if (modeStr == "encode")
+	if (modeVal == OperationMode::Encode)
 	{
 		std::cout << "Encoding " << input->value() << " to " << output->value() << "..." << std::endl;
 
@@ -180,7 +188,7 @@ int main(int argc, char* argv[])
 			return -1;
 		}
 	}
-	else if (modeStr == "decode")
+	else if (modeVal == OperationMode::Decode)
 	{
 		std::cout << "Decoding " << input->value() << " to " << output->value() << "..." << std::endl;
 
@@ -197,8 +205,9 @@ int main(int argc, char* argv[])
 		}
 	}
 
-	// WOpen destination for writing.
-	std::ofstream outputFile(output->value());
+	// Open destination for writing.
+	auto const writemode = modeVal == OperationMode::Decode ? (std::ios::out | std::ios::binary) : std::ios::out;
+	std::ofstream outputFile(output->value(), writemode);
 	if (!outputFile.is_open())
 	{
 		std::cerr << "Cannot open output for writing!";
