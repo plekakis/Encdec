@@ -69,40 +69,75 @@ namespace StringOps
 	}
 }
 
+void ReportError(plusaes::Error const& error)
+{
+	if (error == plusaes::kErrorInvalidBufferSize)
+		std::cerr << "AES error: Invalid buffer size";
+	else if (error == plusaes::kErrorInvalidKeySize)
+		std::cerr << "AES error: Invalid key size";
+	else if (error == plusaes::kErrorInvalidDataSize)
+		std::cerr << "AES error: Invalid data size";
+	else if (error == plusaes::kErrorInvalidKey)
+		std::cerr << "AES error: Invalid key";
+	else if (error == plusaes::kErrorInvalidNonceSize)
+		std::cerr << "AES error: Invalid N once size";
+	else if (error == plusaes::kErrorInvalidIvSize)
+		std::cerr << "AES error: Invalid Iv size";
+	else if (error == plusaes::kErrorInvalidTagSize)
+		std::cerr << "AES error: Invalid tag size";
+	else if (error == plusaes::kErrorInvalidTag)
+		std::cerr << "AES error: Invalid tag";
+}
+
 // Encode string with given key.
-void Encode(std::string& str, std::string const& k)
+bool Encode(std::string const& str, std::vector<uint8_t>& encoded, std::string const& k)
 {
 	char keyval[17];
 	memset(keyval, 0, sizeof(keyval));
-	strcpy_s(keyval, k.c_str());
+	snprintf(keyval, k.size() + 1, k.c_str());
 	auto const key = plusaes::key_from_string(&keyval);
 
 	auto const encryptedSize = plusaes::get_padded_encrypted_size(str.size());
 	std::vector<unsigned char> encrypted(encryptedSize);
 
-	plusaes::encrypt_cbc((unsigned char*)str.data(), str.size(), &key[0], key.size(), &iv, &encrypted[0], encrypted.size(), true);
+	auto const error = plusaes::encrypt_cbc((unsigned char*)str.data(), str.size(), &key[0], key.size(), &iv, &encrypted[0], encrypted.size(), true);
+	if (error != plusaes::kErrorOk)
+	{
+		std::cerr << "Encode errors:" << std::endl;
+		ReportError(error);
+		return false;
+	}
 
-	str = std::string(encrypted.begin(), encrypted.end());
+	encoded = encrypted;
+	return true;
 }
 
 // Decode string with given key.
-void Decode(std::string& str, std::string const& k)
+bool Decode(std::vector<uint8_t> const& encoded, std::string& decoded, std::string const& k)
 {
 	char keyval[17];
 	memset(keyval, 0, sizeof(keyval));
-	strcpy_s(keyval, k.c_str());
+	snprintf(keyval, k.size()+1, k.c_str());
+	
 	auto const key = plusaes::key_from_string(&keyval);
 
-	auto const encryptedSize = plusaes::get_padded_encrypted_size(str.size());
-	std::vector<unsigned char> encrypted(str.begin(), str.end());
+	auto const encryptedSize = plusaes::get_padded_encrypted_size(encoded.size());
 
 	unsigned long paddedSize = 0;
 	std::vector<unsigned char> decrypted(encryptedSize);
 
-	plusaes::decrypt_cbc(&encrypted[0], encrypted.size(), &key[0], key.size(), &iv, &decrypted[0], decrypted.size(), &paddedSize);
+	auto const error = plusaes::decrypt_cbc(&encoded[0], encoded.size(), &key[0], key.size(), &iv, &decrypted[0], decrypted.size(), &paddedSize);
+	if (error != plusaes::kErrorOk)
+	{
+		std::cerr << "Decode errors:" << std::endl;
+		ReportError(error);
+		return false;
+	}
 
-	str = std::string(decrypted.begin(), decrypted.end());
-	StringOps::Trim(str);
+	decoded = std::string(decrypted.begin(), decrypted.end());
+	StringOps::Trim(decoded);
+
+	return true;
 }
 
 int main(int argc, char* argv[])
@@ -163,57 +198,63 @@ int main(int argc, char* argv[])
 	{
 		std::cerr << "Cannot open input for reading!";
 		return -1;
-	}	
-
-	// Read source and encode/decode
-	std::stringstream source;
-	source << inputFile.rdbuf();
-	inputFile.close();
-
-	std::string sourceStr = source.str();
-	// Perform encode/decode operation.
-	if (modeVal == OperationMode::Encode)
-	{
-		std::cout << "Encoding " << input->value() << " to " << output->value() << "..." << std::endl;
-
-		Encode(sourceStr, key->value());
-		// Validate
-		std::cout << "Validating..." << std::endl;
-
-		std::string decoded = sourceStr;		
-		Decode(decoded, key->value());
-		if (decoded != source.str())
-		{
-			std::cerr << "Decoded string doesn't match source after encoding! Skipping file write.";
-			return -1;
-		}
-	}
-	else if (modeVal == OperationMode::Decode)
-	{
-		std::cout << "Decoding " << input->value() << " to " << output->value() << "..." << std::endl;
-
-		Decode(sourceStr, key->value());
-		// Validate
-		std::cout << "Validating..." << std::endl;
-
-		std::string encoded = sourceStr;		
-		Encode(encoded, key->value());
-		if (encoded != source.str())
-		{
-			std::cerr << "Encoded string doesn't match source after decoding! Skipping file write.";
-			return -1;
-		}
 	}
 
 	// Open destination for writing.
-	auto const writemode = modeVal == OperationMode::Decode ? (std::ios::out | std::ios::binary) : std::ios::out;
+	auto const writemode = modeVal == OperationMode::Encode ? (std::ios::out | std::ios::binary) : std::ios::out;
 	std::ofstream outputFile(output->value(), writemode);
 	if (!outputFile.is_open())
 	{
 		std::cerr << "Cannot open output for writing!";
 		return -1;
 	}
-	outputFile << sourceStr;
+
+	// Perform encode/decode operation.
+	if (modeVal == OperationMode::Encode)
+	{
+		std::cout << "Encoding " << input->value() << " to " << output->value() << "..." << std::endl;
+
+		std::stringstream source;
+		source << inputFile.rdbuf();
+		std::vector<uint8_t> encoded;
+		Encode(source.str(), encoded, key->value());
+
+		// Validate
+		std::cout << "Validating..." << std::endl;
+
+		std::string decoded;
+		Decode(encoded, decoded, key->value());
+		if (decoded != source.str())
+		{
+			std::cerr << "Decoded string doesn't match source after encoding! Skipping file write.";
+			return -1;
+		}
+
+		outputFile.write((char*)&encoded[0], encoded.size());
+	}
+	else if (modeVal == OperationMode::Decode)
+	{
+		std::cout << "Decoding " << input->value() << " to " << output->value() << "..." << std::endl;
+				
+		std::vector<uint8_t> encoded((std::istreambuf_iterator<char>(inputFile)), std::istreambuf_iterator<char>());
+		std::string decoded;
+
+		Decode(encoded, decoded, key->value());
+		// Validate
+		std::cout << "Validating..." << std::endl;
+
+		std::vector<uint8_t> encoded2;
+		Encode(decoded, encoded2, key->value());
+		if (encoded != encoded2)
+		{
+			std::cerr << "Encoded string doesn't match source after decoding! Skipping file write.";
+			return -1;
+		}
+
+		outputFile << decoded;
+	}
+
+	inputFile.close();
 	outputFile.close();
 
 	std::cout << "Success!";
