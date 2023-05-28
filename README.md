@@ -16,9 +16,10 @@ Open a commandline and to encode or decode:
 
 Or, if you want to encode *all* of the text files in the current directory:
 * **encdec** -a -m encode -k my_key
+
 The above will generate encoded .bin files for each .txt found. Be careful, as this will overwrite existing files! The same applies to reverse operation, decoding.
 
-Warning: Be careful to always remember/take note of your key!
+**Warning**: Be careful to always remember/take note of your key!
 
 # Libraries
 Uses the following libraries from Github:
