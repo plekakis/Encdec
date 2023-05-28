@@ -10,8 +10,10 @@ As a commandline tool, the following options are available:
 
 ## Example usage
 Open a commandline and to encode or decode:
-* **encdec** -i source.txt -o encrypted.txt -m encode -k my_key
-* **encdec** -i encrypted.txt -o decrypted.txt -m decode -k my_key
+* **encdec** -i source.txt -o encrypted.bin -m encode -k my_key
+* **encdec** -i encrypted.bin -o decrypted.txt -m decode -k my_key
+
+Warning: Be careful to always remember/take note of your key!
 
 # Libraries
 Uses the following libraries from Github:
